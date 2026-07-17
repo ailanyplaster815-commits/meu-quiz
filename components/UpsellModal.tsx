@@ -4,6 +4,7 @@ import { Check } from "lucide-react";
 
 interface UpsellModalProps {
   open: boolean;
+  plano: string;
   onClose: () => void;
   onAccept: () => void;
 }
@@ -18,6 +19,7 @@ const benefits = [
 
 export default function UpsellModal({
   open,
+  plano,
   onClose,
   onAccept,
 }: UpsellModalProps) {
@@ -37,7 +39,7 @@ export default function UpsellModal({
       >
         <div className="text-center">
           <h2 className="text-[24px] font-bold text-black">
-            Aprimore seu plano
+            Aprimore seu plano {plano}
           </h2>
 
           <p className="mt-2 text-[15px] text-gray-500">
