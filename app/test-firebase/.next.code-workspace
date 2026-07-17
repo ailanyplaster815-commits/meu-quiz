@@ -1,0 +1,28 @@
+{
+	"folders": [
+		{
+			"path": "../../.next"
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../components"
+		},
+		{
+			"path": "../../context"
+		},
+		{
+			"path": "../../node_modules"
+		},
+		{
+			"path": "../../public"
+		},
+		{
+			"path": "../../src"
+		},
+		{
+			"path": "../../types"
+		}
+	]
+}
