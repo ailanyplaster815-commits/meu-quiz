@@ -1,17 +1,18 @@
 import {
   signInWithPopup,
   signInAnonymously,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
-  updateProfile,
 } from "firebase/auth";
 
 import {
   auth,
-  googleProvider
+  googleProvider,
 } from "./firebase";
 
 
-
+// LOGIN COM GOOGLE
 export async function loginComGoogle() {
 
   const result = await signInWithPopup(
@@ -19,59 +20,65 @@ export async function loginComGoogle() {
     googleProvider
   );
 
-
   return {
-
     uid: result.user.uid,
-
     nome: result.user.displayName ?? "",
-
     email: result.user.email ?? "",
-
     foto: result.user.photoURL ?? "",
-
   };
-
 }
 
 
+// LOGIN COM EMAIL E SENHA
+export async function loginComEmail(
+  email: string,
+  senha: string
+) {
 
-
-export async function loginComEmail(email: string) {
-
-
-  const result = await signInAnonymously(auth);
-
-
-
-  await updateProfile(
-    result.user,
-    {
-      displayName: email,
-    }
+  const result = await signInWithEmailAndPassword(
+    auth,
+    email,
+    senha
   );
 
-
-
   return {
-
     uid: result.user.uid,
-
-    nome: email,
-
-    email: email,
-
-    foto: "",
-
+    nome: result.user.displayName ?? "",
+    email: result.user.email ?? "",
+    foto: result.user.photoURL ?? "",
   };
+}
+
+
+// RECUPERAR SENHA
+export async function recuperarSenha(
+  email: string
+) {
+
+  await sendPasswordResetEmail(
+    auth,
+    email
+  );
 
 }
 
 
-
-
+// LOGOUT
 export async function logout() {
 
   await signOut(auth);
+
+}
+
+
+// LOGIN ANÔNIMO
+export async function loginAnonimo() {
+
+  const result = await signInAnonymously(auth);
+
+  return {
+    uid: result.user.uid,
+    email: result.user.email,
+  };
 
 }

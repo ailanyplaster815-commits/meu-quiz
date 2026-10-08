@@ -15,7 +15,17 @@ export default function Pacotes() {
   const [mostrarUpsellPacote3, setMostrarUpsellPacote3] = useState(false);
 
   const router = useRouter();
+const irParaCheckout = (plano: string, preco: number, upsell: number = 0) => {
+  localStorage.setItem("planoSelecionado", plano);
+  localStorage.setItem("precoPlano", preco.toFixed(2));
+  localStorage.setItem("valorUpsell", upsell.toFixed(2));
 
+  const valorTotal = preco + upsell;
+
+  localStorage.setItem("precoTotal", valorTotal.toFixed(2));
+
+  router.push("/checkout");
+};
   useEffect(() => {
     const valor = localStorage.getItem("objetivo");
     if (valor) {
@@ -69,22 +79,22 @@ export default function Pacotes() {
     </button>
 
     <button
-      onClick={() => {
-  localStorage.setItem("editarObjetivo", "true");
-  router.push("/");
-}}
-      style={{
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-        color: "#16a329",
-        fontWeight: 700,
-        fontSize: 15,
-      }}
-    >
-      Mudar objetivo
-    </button>
-  </div>
+  onClick={() => {
+    localStorage.setItem("editarObjetivo", "true");
+    router.push("/formulario");
+  }}
+  style={{
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    color: "#16a329",
+    fontWeight: 700,
+    fontSize: 15,
+  }}
+>
+  Mudar objetivo
+</button>
+</div>
 
   <h1
     style={{
@@ -501,45 +511,44 @@ Escolher Plano
   >
     Escolher Plano
   </button>
-</div>  // fecha PACOTE 4
+</div> {/* fecha PACOTE 4 */}
 
-</div>  // fecha container dos pacotes
+</div> {/* fecha container dos pacotes */}
 
 <UpsellModal
   open={mostrarUpsellPacote1}
   plano={planoSelecionado}
   onClose={() => {
-    console.log("Checkout normal");
     setMostrarUpsellPacote1(false);
+    irParaCheckout("plano_objetivo", 9.99, 0);
   }}
   onAccept={() => {
-    console.log("Checkout com adicional");
     setMostrarUpsellPacote1(false);
+    irParaCheckout("plano_objetivo", 9.99, 5.99);
   }}
 />
 
 <UpsellPacote2Modal
   open={mostrarUpsellPacote2}
   onClose={() => {
-    console.log("Checkout normal pacote 2");
     setMostrarUpsellPacote2(false);
+    irParaCheckout("dieta_treino", 14.99, 0);
   }}
-  
   onAccept={() => {
-    console.log("Checkout pacote 2 + upsell");
     setMostrarUpsellPacote2(false);
+    irParaCheckout("dieta_treino", 14.99, 5.99);
   }}
-  />
+/>
 
-  <UpsellPacote3Modal
+<UpsellPacote3Modal
   open={mostrarUpsellPacote3}
   onClose={() => {
-    console.log("Checkout normal pacote 3");
     setMostrarUpsellPacote3(false);
+    irParaCheckout("plano_completo", 15.99, 0);
   }}
   onAccept={() => {
-    console.log("Checkout pacote 3 + adicional");
     setMostrarUpsellPacote3(false);
+    irParaCheckout("plano_completo", 15.99, 2.99);
   }}
 />
     </main>

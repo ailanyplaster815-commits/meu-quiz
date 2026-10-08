@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { QuizData } from "@/types/quiz";
 import { db, auth } from "../lib/firebase";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 
 /* =========================
    FORMULÁRIO PRINCIPAL
@@ -28,112 +28,315 @@ export default function Formulario() {
     alimentos: [] as string[],
   });
 
+  const [cafeSelecionados, setCafeSelecionados] = useState<string[]>([]);
+  const [almocoSelecionados, setAlmocoSelecionados] = useState<string[]>([]);
+  const [lancheSelecionados, setLancheSelecionados] = useState<string[]>([]);
+  const [jantaSelecionados, setJantaSelecionados] = useState<string[]>([]);
+
+  /* =========================
+     SALVAR FORMULÁRIO
+  ========================= */
+
   const salvarFormulario = async () => {
-  console.log("Botão clicado");
-  console.log(formulario);
+    console.log("========== INÍCIO DO SALVAMENTO ==========");
+    console.log("Formulário atual:", formulario);
 
-  try {
-    const user = auth.currentUser;
+    try {
+      if (!authCarregado) {
+        console.log("⏳ Firebase Auth ainda carregando...");
+        alert("Aguarde o carregamento do usuário...");
+        return;
+      }
 
-    if (!authCarregado) {
-      alert("Aguarde carregando usuário...");
-      return;
-    }
+      const user = auth.currentUser;
 
-    if (!user) {
-      alert("Usuário não autenticado. Faça login novamente.");
-      return;
-    }
+      console.log("Usuário atual:", user);
 
-    await setDoc(
-      doc(db, "quizzes", user.uid),
-      {
-        ...formulario,
-        createdAt: new Date(),
+      if (!user) {
+        console.log("❌ Nenhum usuário autenticado.");
+        alert("Usuário não autenticado. Faça login novamente.");
+        return;
+      }
+
+      console.log("UID:", user.uid);
+      console.log("Email:", user.email);
+
+      const dadosQuiz = {
+        peso: formulario.peso,
+        altura: formulario.altura,
+        idade: formulario.idade,
+        objetivo: formulario.objetivo,
+        sexo: formulario.sexo,
+        horario: formulario.horario,
+        rotina: formulario.rotina,
+        atividade: formulario.atividade,
+        treino: formulario.treino,
+        observacao: formulario.observacao,
+        alimentos: formulario.alimentos,
+
         uid: user.uid,
         email: user.email,
         nome: user.displayName,
         foto: user.photoURL,
-      },
-      { merge: true }
-    );
 
-    console.log("Quiz salvo com sucesso!");
+        etapa: "questionario",
+        updatedAt: new Date(),
+      };
 
-    router.push("/preparando");
+      console.log("📦 Salvando questionário no Firebase...");
 
-  } catch (error) {
-    console.error("ERRO FIREBASE:", error);
-    alert(String(error));
-  }
-};
+      await setDoc(
+        doc(db, "quizzes", user.uid),
+        dadosQuiz,
+        { merge: true }
+      );
 
-useEffect(() => {
-  const salvo = localStorage.getItem("formulario");
+      console.log("✅ QUIZ SALVO COM SUCESSO!");
 
-if (salvo) {
-  const dados = JSON.parse(salvo) as QuizData;
-  setFormulario(dados);
-}
-}, []);
+      /* =========================
+         GERAR DIETA COM IA
+      ========================= */
 
-useEffect(() => {
+      console.log("🤖 Enviando questionário para o Gemini...");
 
-  const unsubscribe = auth.onAuthStateChanged((user) => {
-
-    if (user) {
-      console.log("Usuário autenticado:", user.uid);
-    } else {
-      console.log("Nenhum usuário autenticado");
-    }
-
-    setAuthCarregado(true);
-
-  });
-
-
-  return () => unsubscribe();
-
-}, []);
-
-useEffect(() => {
-  localStorage.setItem(
-    "formulario",
-    JSON.stringify(formulario)
-  );
-}, [formulario]);
-
-  const objetivoRef = useRef<HTMLSelectElement>(null);
-
-  function toggleItem(item: string) {
-  setFormulario((prev) => {
-    const existe = prev.alimentos.includes(item);
-
-    return {
-      ...prev,
-      alimentos: existe
-        ? prev.alimentos.filter((i) => i !== item)
-        : [...prev.alimentos, item],
-    };
-  });
-}
-
-  useEffect(() => {
-  const editarObjetivo = localStorage.getItem("editarObjetivo");
-
-  if (editarObjetivo === "true") {
-    setTimeout(() => {
-      objetivoRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
+      const response = await fetch("/api/gerar-dieta", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formulario),
       });
 
-      objetivoRef.current?.focus();
+      const resultado = await response.json();
 
-      localStorage.removeItem("editarObjetivo");
-    }, 300);
+      console.log("📥 Resposta da IA:", resultado);
+
+      if (!response.ok || !resultado.sucesso) {
+        throw new Error(
+          resultado.erro || "Não foi possível gerar a dieta."
+        );
+      }
+
+      console.log("✅ DIETA GERADA COM SUCESSO!");
+      console.log(resultado.dieta);
+
+      localStorage.setItem(
+        "dietaGerada",
+        JSON.stringify(resultado.dieta)
+      );
+
+      router.push("/preparando");
+    } catch (error) {
+      console.error("❌ ERRO NO PROCESSO:");
+      console.error(error);
+
+      alert(
+        "Não foi possível montar sua dieta agora. Veja o console para mais detalhes."
+      );
+    }
+  };
+
+  /* =========================
+     CARREGAR FORMULÁRIO
+  ========================= */
+
+  useEffect(() => {
+  const carregarDadosSalvos = async () => {
+    if (!authCarregado) return;
+
+    const user = auth.currentUser;
+
+    if (!user) return;
+
+    try {
+      const ref = doc(db, "quizzes", user.uid);
+      const snap = await getDoc(ref);
+
+      if (snap.exists()) {
+        const dados = snap.data();
+
+        const alimentosSalvos: string[] = Array.isArray(dados.alimentos)
+          ? dados.alimentos
+          : [];
+
+        setFormulario((anterior) => ({
+          ...anterior,
+          peso: dados.peso || "",
+          altura: dados.altura || "",
+          idade: dados.idade || "",
+          objetivo: dados.objetivo || "",
+          sexo: dados.sexo || "",
+          horario: dados.horario || "",
+          rotina: dados.rotina || "",
+          atividade: dados.atividade || "",
+          treino: dados.treino || "",
+          observacao: dados.observacao || "",
+          alimentos: alimentosSalvos,
+        }));
+
+        // Recupera as opções que já estavam selecionadas
+        setCafeSelecionados(
+          alimentosSalvos.filter((item) => cafe.includes(item))
+        );
+
+        setAlmocoSelecionados(
+          alimentosSalvos.filter((item) => almoco.includes(item))
+        );
+
+        // Como o lanche atualmente usa a lista "cafe",
+        // recuperamos as opções do lanche usando essa mesma lista.
+        setLancheSelecionados(
+          alimentosSalvos.filter((item) => cafe.includes(item))
+        );
+
+        // Como a janta atualmente usa a lista "almoco",
+        // recuperamos as opções da janta usando essa mesma lista.
+        setJantaSelecionados(
+          alimentosSalvos.filter((item) => almoco.includes(item))
+        );
+      }
+    } catch (erro) {
+      console.error("Erro ao carregar dados salvos:", erro);
+    }
+  };
+
+  carregarDadosSalvos();
+}, [authCarregado]);
+
+  /* =========================
+     FIREBASE AUTH
+  ========================= */
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        console.log("Usuário autenticado:", user.uid);
+      } else {
+        console.log("Nenhum usuário autenticado");
+      }
+
+      setAuthCarregado(true);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  /* =========================
+     SALVAR NO LOCALSTORAGE
+  ========================= */
+
+  useEffect(() => {
+    localStorage.setItem(
+      "formulario",
+      JSON.stringify(formulario)
+    );
+  }, [formulario]);
+
+  /* =========================
+     REFS
+  ========================= */
+
+  const objetivoRef = useRef<HTMLSelectElement>(null);
+  const cafeRef = useRef<HTMLDivElement>(null);
+  const almocoRef = useRef<HTMLDivElement>(null);
+  const lancheRef = useRef<HTMLDivElement>(null);
+  const jantaRef = useRef<HTMLDivElement>(null);
+
+  const pesoRef = useRef<HTMLInputElement>(null);
+  const alturaRef = useRef<HTMLInputElement>(null);
+  const idadeRef = useRef<HTMLInputElement>(null);
+  const horarioRef = useRef<HTMLSelectElement>(null);
+  const sexoRef = useRef<HTMLDivElement>(null);
+
+  /* =========================
+     SELEÇÃO DOS ALIMENTOS
+  ========================= */
+
+  function toggleItem(item: string) {
+    setFormulario((prev) => {
+      const existe = prev.alimentos.includes(item);
+
+      return {
+        ...prev,
+        alimentos: existe
+          ? prev.alimentos.filter((i) => i !== item)
+          : [...prev.alimentos, item],
+      };
+    });
   }
-}, []);
+
+  function toggleCafe(item: string) {
+    setCafeSelecionados((prev) => {
+      const existe = prev.includes(item);
+
+      return existe
+        ? prev.filter((i) => i !== item)
+        : [...prev, item];
+    });
+
+    toggleItem(item);
+  }
+
+  function toggleAlmoco(item: string) {
+    setAlmocoSelecionados((prev) => {
+      const existe = prev.includes(item);
+
+      return existe
+        ? prev.filter((i) => i !== item)
+        : [...prev, item];
+    });
+
+    toggleItem(item);
+  }
+
+  function toggleLanche(item: string) {
+    setLancheSelecionados((prev) => {
+      const existe = prev.includes(item);
+
+      return existe
+        ? prev.filter((i) => i !== item)
+        : [...prev, item];
+    });
+
+    toggleItem(item);
+  }
+
+  function toggleJanta(item: string) {
+    setJantaSelecionados((prev) => {
+      const existe = prev.includes(item);
+
+      return existe
+        ? prev.filter((i) => i !== item)
+        : [...prev, item];
+    });
+
+    toggleItem(item);
+  }
+
+  /* =========================
+     EDITAR OBJETIVO
+  ========================= */
+
+  useEffect(() => {
+    const editarObjetivo = localStorage.getItem("editarObjetivo");
+
+    if (editarObjetivo === "true") {
+      setTimeout(() => {
+        objetivoRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+
+        objetivoRef.current?.focus();
+
+        localStorage.removeItem("editarObjetivo");
+      }, 300);
+    }
+  }, []);
+
+  /* =========================
+     COMPONENTES DOS ALIMENTOS
+  ========================= */
 
   function Item({ text }: { text: string }) {
     const active = formulario.alimentos.includes(text);
@@ -155,6 +358,96 @@ useEffect(() => {
     );
   }
 
+  function CafeItem({ text }: { text: string }) {
+    const active = cafeSelecionados.includes(text);
+
+    return (
+      <div
+        onClick={() => toggleCafe(text)}
+        style={{
+          ...card,
+          border: active ? "2px solid #16a329" : "1px solid #ddd",
+          background: active ? "#dcfce7" : "#fff",
+          color: active ? "#166534" : "#111827",
+          fontWeight: active ? 600 : 400,
+        }}
+      >
+        <span>{text}</span>
+        {active && <span>✅</span>}
+      </div>
+    );
+  }
+
+  function CafeGrid() {
+    return (
+      <div style={grid}>
+        {cafe.map((item, index) => (
+          <CafeItem key={index} text={item} />
+        ))}
+      </div>
+    );
+  }
+
+  function AlmocoItem({ text }: { text: string }) {
+    const active = almocoSelecionados.includes(text);
+
+    return (
+      <div
+        onClick={() => toggleAlmoco(text)}
+        style={{
+          ...card,
+          border: active ? "2px solid #16a329" : "1px solid #ddd",
+          background: active ? "#dcfce7" : "#fff",
+          color: active ? "#166534" : "#111827",
+          fontWeight: active ? 600 : 400,
+        }}
+      >
+        <span>{text}</span>
+        {active && <span>✅</span>}
+      </div>
+    );
+  }
+
+  function AlmocoGrid() {
+    return (
+      <div style={grid}>
+        {almoco.map((item, index) => (
+          <AlmocoItem key={index} text={item} />
+        ))}
+      </div>
+    );
+  }
+
+  function LancheItem({ text }: { text: string }) {
+    const active = lancheSelecionados.includes(text);
+
+    return (
+      <div
+        onClick={() => toggleLanche(text)}
+        style={{
+          ...card,
+          border: active ? "2px solid #16a329" : "1px solid #ddd",
+          background: active ? "#dcfce7" : "#fff",
+          color: active ? "#166534" : "#111827",
+          fontWeight: active ? 600 : 400,
+        }}
+      >
+        <span>{text}</span>
+        {active && <span>✅</span>}
+      </div>
+    );
+  }
+
+  function LancheGrid() {
+    return (
+      <div style={grid}>
+        {cafe.map((item, index) => (
+          <LancheItem key={index} text={item} />
+        ))}
+      </div>
+    );
+  }
+
   function Grid({ items }: { items: string[] }) {
     return (
       <div style={grid}>
@@ -165,186 +458,370 @@ useEffect(() => {
     );
   }
 
+  /* =========================
+     RENDER
+  ========================= */
+
   return (
     <main style={container}>
       <div style={box}>
-        <CardSection title="Medidas corporais">
+
+        {/* MEDIDAS CORPORAIS */}
+
+        <CardSection title="Medidas corporais🧍‍♀️📏">
+
+  <p
+    style={{
+      margin: 0,
+      fontSize: 13,
+      color: "#777",
+    }}
+  >
+    Preencha com as suas informações
+  </p>
+
+  <input
+    ref={pesoRef}
+    style={input}
+    placeholder="Peso (kg)"
+    value={formulario.peso}
+    onChange={(e) =>
+      setFormulario({
+        ...formulario,
+        peso: e.target.value,
+      })
+    }
+  />
+
           <input
-  style={input}
-  placeholder="Peso (kg)"
-  value={formulario.peso}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      peso: e.target.value,
-    })
-  }
-/>
+            ref={alturaRef}
+            style={input}
+            placeholder="Altura (cm)"
+            value={formulario.altura}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                altura: e.target.value,
+              })
+            }
+          />
+
           <input
-  style={input}
-  placeholder="Altura (cm)"
-  value={formulario.altura}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      altura: e.target.value,
-    })
-  }
-/>
-          <input
-  style={input}
-  placeholder="Idade"
-  value={formulario.idade}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      idade: e.target.value,
-    })
-  }
-/>
+            ref={idadeRef}
+            style={input}
+            placeholder="Idade"
+            value={formulario.idade}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                idade: e.target.value,
+              })
+            }
+          />
 
           {/* OBJETIVO */}
+
           <select
-  ref={objetivoRef}
-  style={input}
-  value={formulario.objetivo}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      objetivo: e.target.value,
-    })
-  }
->
+            ref={objetivoRef}
+            style={input}
+            value={formulario.objetivo}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                objetivo: e.target.value,
+              })
+            }
+          >
             <option value="">Objetivo</option>
             <option value="Ganhar massa muscular">
               Ganhar massa muscular
             </option>
-            <option value="Perder peso">Perder peso</option>
-            <option value="Manter boa forma">Manter boa forma</option>
+            <option value="Perder peso">
+              Perder peso
+            </option>
+            <option value="Manter boa forma">
+              Manter boa forma
+            </option>
           </select>
 
-<select
-  style={input}
-  value={formulario.horario}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      horario: e.target.value,
-    })
-  }
->            <option value="">Horários das refeições</option>
-<option value="08:00 / 11:00 / 14:00 / 18:00">
-  08:00 / 11:00 / 14:00 / 18:00
-</option>
-<option value="07:00 / 10:00 / 13:00 / 19:00">
-  07:00 / 10:00 / 13:00 / 19:00
-</option>
+          {/* HORÁRIOS */}
+
+          <select
+            ref={horarioRef}
+            style={input}
+            value={formulario.horario}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                horario: e.target.value,
+              })
+            }
+          >
+            <option value="">
+              Horários das refeições
+            </option>
+
+            <option value="05:30 / 08:30 / 12:00 / 15:00 / 19:00">
+              05:30 / 08:30 / 12:00 / 15:00 / 19:00
+            </option>
+
+            <option value="06:00 / 09:00 / 12:00 / 15:00 / 19:00">
+              06:00 / 09:00 / 12:00 / 15:00 / 19:00
+            </option>
+
+            <option value="06:30 / 09:30 / 13:00 / 16:00 / 20:00">
+              06:30 / 09:30 / 13:00 / 16:00 / 20:00
+            </option>
+
+            <option value="07:00 / 10:00 / 12:30 / 15:30 / 19:30">
+              07:00 / 10:00 / 12:30 / 15:30 / 19:30
+            </option>
+
+            <option value="07:30 / 10:30 / 12:00 / 15:00 / 19:00">
+              07:30 / 10:30 / 12:00 / 15:00 / 19:00
+            </option>
+
+            <option value="08:00 / 11:00 / 13:30 / 16:30 / 20:30">
+              08:00 / 11:00 / 13:30 / 16:30 / 20:30
+            </option>
           </select>
 
-          <div style={row}>
-  <button
-    style={sexoBtn(formulario.sexo === "masculino")}
-    onClick={() =>
-      setFormulario({
-        ...formulario,
-        sexo: "masculino",
-      })
-    }
-  >
-    Masculino
-  </button>
+          {/* SEXO */}
 
-  <button
-    style={sexoBtn(formulario.sexo === "feminino")}
-    onClick={() =>
-      setFormulario({
-        ...formulario,
-        sexo: "feminino",
-      })
-    }
-  >
-    Feminino
-  </button>
-</div>
-</CardSection>
+          <div ref={sexoRef} style={row}>
+            <button
+              type="button"
+              style={sexoBtn(formulario.sexo === "masculino")}
+              onClick={() =>
+                setFormulario({
+                  ...formulario,
+                  sexo: "masculino",
+                })
+              }
+            >
+              Masculino♂️
+            </button>
 
-        <CardSection title="Café da manhã">
-          <Grid items={cafe} />
+            <button
+              type="button"
+              style={sexoBtn(formulario.sexo === "feminino")}
+              onClick={() =>
+                setFormulario({
+                  ...formulario,
+                  sexo: "feminino",
+                })
+              }
+            >
+              Feminino♀️
+            </button>
+          </div>
+
         </CardSection>
 
-        <CardSection title="Almoço">
-          <Grid items={almoco} />
+        {/* CAFÉ DA MANHÃ */}
+
+        <div ref={cafeRef}>
+          <CardSection title="Café da manhã☕">
+
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                color:
+                  cafeSelecionados.length >= 3
+                    ? "#16a329"
+                    : "#777",
+              }}
+            >
+              {cafeSelecionados.length >= 3
+                ? `✓ ${cafeSelecionados.length} opções selecionadas`
+                : "Selecione pelo menos 3 opções"}
+            </p>
+
+            <CafeGrid />
+
+          </CardSection>
+        </div>
+
+        {/* ALMOÇO */}
+
+        <div ref={almocoRef}>
+          <CardSection title="Almoço🍽️">
+
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                color:
+                  almocoSelecionados.length >= 3
+                    ? "#16a329"
+                    : "#777",
+              }}
+            >
+              {almocoSelecionados.length >= 3
+                ? `✓ ${almocoSelecionados.length} opções selecionadas`
+                : "Selecione pelo menos 3 opções"}
+            </p>
+
+            <AlmocoGrid />
+
+          </CardSection>
+        </div>
+
+        {/* LANCHE DA TARDE */}
+
+        <div ref={lancheRef}>
+          <CardSection title="Lanche da Tarde🥐">
+
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                color:
+                  lancheSelecionados.length >= 3
+                    ? "#16a329"
+                    : "#777",
+              }}
+            >
+              {lancheSelecionados.length >= 3
+                ? `✓ ${lancheSelecionados.length} opções selecionadas`
+                : "Selecione pelo menos 3 opções"}
+            </p>
+
+            <LancheGrid />
+
+          </CardSection>
+        </div>
+
+        {/* JANTA */}
+
+        <div ref={jantaRef}>
+          <CardSection title="Janta🍴">
+
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                color:
+                  jantaSelecionados.length >= 3
+                    ? "#16a329"
+                    : "#777",
+              }}
+            >
+              {jantaSelecionados.length >= 3
+                ? `✓ ${jantaSelecionados.length} opções selecionadas`
+                : "Selecione pelo menos 3 opções"}
+            </p>
+
+            <div style={grid}>
+              {almoco.map((item, index) => {
+                const active =
+                  jantaSelecionados.includes(item);
+
+                return (
+                  <div
+                    key={index}
+                    onClick={() => toggleJanta(item)}
+                    style={{
+                      ...card,
+                      border: active
+                        ? "2px solid #16a329"
+                        : "1px solid #ddd",
+                      background: active
+                        ? "#dcfce7"
+                        : "#fff",
+                      color: active
+                        ? "#166534"
+                        : "#111827",
+                      fontWeight: active ? 600 : 400,
+                    }}
+                  >
+                    <span>{item}</span>
+                    {active && <span>✅</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+          </CardSection>
+        </div>
+
+        {/* OBSERVAÇÃO */}
+
+        <CardSection title="Lanche da manhã (opcional)">
+          <input
+            style={input}
+            placeholder="Digite aqui..."
+            value={formulario.observacao}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                observacao: e.target.value,
+              })
+            }
+          />
         </CardSection>
 
-        <CardSection title="Lanche da Tarde">
-          <Grid items={cafe} />
-        </CardSection>
-
-        <CardSection title="Janta">
-          <Grid items={almoco} />
-        </CardSection>
-
-        <CardSection title="Lanche da manhã (opcional)"><input
-  style={input}
-  placeholder="Digite aqui..."
-  value={formulario.observacao}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      observacao: e.target.value,
-    })
-  }
-/>
-        </CardSection>
+        {/* ROTINA */}
 
         <CardSection title="Informações de Rotina">
-          <select
-  style={input}
-  value={formulario.rotina}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      rotina: e.target.value,
-    })
-  }
->
-  <option value="">Como é sua rotina?</option>
-  <option value="Leve">Leve</option>
-  <option value="Moderada">Moderada</option>
-  <option value="Intensa">Intensa</option>
-</select>
 
           <select
-  style={input}
-  value={formulario.atividade}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      atividade: e.target.value,
-    })
-  }
->
-  <option value="">Quantidade de atividade atual</option>
-  <option value="Baixa">Baixa</option>
-  <option value="Média">Média</option>
-  <option value="Alta">Alta</option>
-</select>
+            style={input}
+            value={formulario.rotina}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                rotina: e.target.value,
+              })
+            }
+          >
+            <option value="">
+              Como é sua rotina?
+            </option>
+            <option value="Leve">Leve</option>
+            <option value="Moderada">Moderada</option>
+            <option value="Intensa">Intensa</option>
+          </select>
 
           <select
-  style={input}
-  value={formulario.treino}
-  onChange={(e) =>
-    setFormulario({
-      ...formulario,
-      treino: e.target.value,
-    })
-  }
->
-  <option value="">Deseja treino?</option>
-  <option value="Sim">Sim</option>
-  <option value="Não">Não</option>
-</select>
+            style={input}
+            value={formulario.atividade}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                atividade: e.target.value,
+              })
+            }
+          >
+            <option value="">
+              Quantidade de atividade atual
+            </option>
+            <option value="Baixa">Baixa</option>
+            <option value="Média">Média</option>
+            <option value="Alta">Alta</option>
+          </select>
+
+          <select
+            style={input}
+            value={formulario.treino}
+            onChange={(e) =>
+              setFormulario({
+                ...formulario,
+                treino: e.target.value,
+              })
+            }
+          >
+            <option value="">
+              Deseja treino?
+            </option>
+            <option value="Sim">Sim</option>
+            <option value="Não">Não</option>
+          </select>
+
         </CardSection>
+
+        {/* CHOCOLATE */}
 
         <CardSection title="🍫 Quer Chocolate?">
           <Grid
@@ -356,7 +833,97 @@ useEffect(() => {
           />
         </CardSection>
 
-        <OfertaFinal salvarFormulario={salvarFormulario} />
+        {/* OFERTA FINAL */}
+
+        <OfertaFinal
+          salvarFormulario={salvarFormulario}
+          formulario={formulario}
+          cafeSelecionados={cafeSelecionados}
+          almocoSelecionados={almocoSelecionados}
+          lancheSelecionados={lancheSelecionados}
+          jantaSelecionados={jantaSelecionados}
+
+          scrollParaPeso={() => {
+            pesoRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+
+            pesoRef.current?.focus();
+          }}
+
+          scrollParaAltura={() => {
+            alturaRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+
+            alturaRef.current?.focus();
+          }}
+
+          scrollParaIdade={() => {
+            idadeRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+
+            idadeRef.current?.focus();
+          }}
+
+          scrollParaObjetivo={() => {
+            objetivoRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+
+            objetivoRef.current?.focus();
+          }}
+
+          scrollParaHorario={() => {
+            horarioRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+
+            horarioRef.current?.focus();
+          }}
+
+          scrollParaSexo={() => {
+            sexoRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          }}
+
+          scrollParaCafe={() => {
+            cafeRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }}
+
+          scrollParaAlmoco={() => {
+            almocoRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }}
+
+          scrollParaLanche={() => {
+            lancheRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }}
+
+          scrollParaJanta={() => {
+            jantaRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }}
+        />
+
       </div>
     </main>
   );
@@ -368,37 +935,85 @@ useEffect(() => {
 
 function OfertaFinal({
   salvarFormulario,
+  formulario,
+  cafeSelecionados,
+  almocoSelecionados,
+  lancheSelecionados,
+  jantaSelecionados,
+  scrollParaCafe,
+  scrollParaAlmoco,
+  scrollParaLanche,
+  scrollParaJanta,
+  scrollParaPeso,
+  scrollParaAltura,
+  scrollParaIdade,
+  scrollParaObjetivo,
+  scrollParaHorario,
+  scrollParaSexo,
 }: {
   salvarFormulario: () => Promise<void>;
+  formulario: QuizData;
+
+  cafeSelecionados: string[];
+  almocoSelecionados: string[];
+  lancheSelecionados: string[];
+  jantaSelecionados: string[];
+
+  scrollParaCafe: () => void;
+  scrollParaAlmoco: () => void;
+  scrollParaLanche: () => void;
+  scrollParaJanta: () => void;
+
+  scrollParaPeso: () => void;
+  scrollParaAltura: () => void;
+  scrollParaIdade: () => void;
+  scrollParaObjetivo: () => void;
+  scrollParaHorario: () => void;
+  scrollParaSexo: () => void;
 }) {
   const router = useRouter();
   const [hover, setHover] = useState(false);
 
   const imagens = [
-    "/1.png","/2.png","/3.png","/4.png","/5.png","/6.png",
-    "/7.png","/8.png","/9.png","/10.png","/11.png","/12.png",
+    "/1.png",
+    "/2.png",
+    "/3.png",
+    "/4.png",
+    "/5.png",
+    "/6.png",
+    "/7.png",
+    "/8.png",
+    "/9.png",
+    "/10.png",
+    "/11.png",
+    "/12.png",
   ];
 
-const [slide, setSlide] = useState(0);
-const itensPorPagina = 3;
+  const [slide, setSlide] = useState(0);
+  const itensPorPagina = 3;
 
   useEffect(() => {
-  const timer = setInterval(() => {
-    setSlide((prev) =>
-      prev >= Math.ceil(imagens.length / itensPorPagina) - 1
-        ? 0
-        : prev + 1
-    );
-  }, 3000);
+    const timer = setInterval(() => {
+      setSlide((prev) =>
+        prev >=
+        Math.ceil(imagens.length / itensPorPagina) - 1
+          ? 0
+          : prev + 1
+      );
+    }, 3000);
 
-  return () => clearInterval(timer);
-}, []);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div style={ofertaContainer}>
-      <h2 style={ofertaTitulo}>Sua dieta, do seu jeito!</h2>
+
+      <h2 style={ofertaTitulo}>
+        Sua dieta, do seu jeito!
+      </h2>
 
       <div style={social}>
+
         <div style={socialLeft}>
           <img src="/avatar1.png" style={avatarMini} />
           <img src="/avatar2.png" style={avatarMini} />
@@ -407,49 +1022,113 @@ const itensPorPagina = 3;
           <img src="/avatar5.png" style={avatarMini} />
         </div>
 
-        <div style={socialRight}>+19 mil pessoas já usaram</div>
-      </div>
-
-      <p style={resultadoTitulo}>RESULTADOS REAIS</p>
-
-      <div style={carousel}>
-        <div
-          style={{
-            ...track,
-            transform: `translateX(-${slide * 33.33}%)`,
-          }}
-        >
-          {imagens.map((img, index) => (
-            <div key={index} style={imageBox}>
-              <img src={img} style={carouselImage} />
-            </div>
-          ))}
+        <div style={socialRight}>
+          +19 mil pessoas já usaram
         </div>
+
       </div>
 
-      <div style={dots}>
-        {[0,1,2,3,4,5,6,7,8,9].map((_, index) => (
-          <div
-            key={index}
-            style={{
-              ...dot,
-              opacity: slide === index ? 1 : 0.3,
-            }}
-          />
-        ))}
+      <p style={resultadoTitulo}>
+        RESULTADOS REAIS
+      </p>
+
+      <div
+  style={{
+    width: "100%",
+    overflow: "hidden",
+    marginTop: 8,
+    marginBottom: 4,
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      gap: 10,
+      transform: `translateX(-${slide * 33.33}%)`,
+      transition: "transform 0.5s ease",
+    }}
+  >
+    {imagens.map((img, index) => (
+      <div
+        key={index}
+        style={{
+          flex: "0 0 calc(33.33% - 7px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          borderRadius: 10,
+        }}
+      >
+        <img
+          src={img}
+          alt={`Resultado ${index + 1}`}
+          style={{
+            width: "100%",
+            height: 180,
+            objectFit: "contain",
+            display: "block",
+          }}
+        />
+      </div>
+    ))}
+  </div>
+</div>
+
+<div
+  style={{
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 8,
+  }}
+>
+  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(
+    (_, index) => (
+      <div
+        key={index}
+        style={{
+          width: slide === index ? 8 : 6,
+          height: slide === index ? 8 : 6,
+          borderRadius: "50%",
+          background: "#16a329",
+          opacity: slide === index ? 1 : 0.3,
+          transition: "all 0.2s ease",
+        }}
+      />
+    )
+  )}
+
       </div>
 
       <div style={linha} />
 
       <div style={ofertaInfo}>
+
         <div style={precoBox}>
-          <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>
+
+          <span
+            style={{
+              fontSize: 10,
+              color: "#6b7280",
+              fontWeight: 600,
+            }}
+          >
             A PARTIR DE
           </span>
 
-          <strong style={{ fontSize: 28, color: "#16a329" }}>
-            <br></br>R$ 9,99
+          <strong
+            style={{
+              fontSize: 28,
+              color: "#16a329",
+            }}
+          >
+            <br />
+            R$ 9,99
           </strong>
+
         </div>
 
         <div style={beneficios}>
@@ -457,22 +1136,149 @@ const itensPorPagina = 3;
           <p>✅ Baseado nas suas preferências</p>
           <p>✅ Modifique quando quiser</p>
         </div>
+
       </div>
 
-<button
-  style={{
-    ...btnFinal,
-    transform: hover ? "scale(1.08)" : "scale(1)",
-    transition: "0.2s",
-  }}
-  onMouseEnter={() => setHover(true)}
-  onMouseLeave={() => setHover(false)}
-  onClick={salvarFormulario}
->
-  Montar minha dieta →
-</button>
+      {/* BOTÃO FINAL */}
 
-<p style={pagamento}>Pagamento seguro 🔒</p>
+      <button
+        type="button"
+        style={{
+          ...btnFinal,
+          transform: hover
+            ? "scale(1.08)"
+            : "scale(1)",
+          transition: "0.2s",
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onClick={() => {
+
+          if (!formulario.peso) {
+            alert(
+              "Preencha seu peso para continuar."
+            );
+
+            scrollParaPeso();
+            return;
+          }
+
+          if (!formulario.altura) {
+            alert(
+              "Preencha sua altura para continuar."
+            );
+
+            scrollParaAltura();
+            return;
+          }
+
+          if (!formulario.idade) {
+            alert(
+              "Preencha sua idade para continuar."
+            );
+
+            scrollParaIdade();
+            return;
+          }
+
+          if (!formulario.objetivo) {
+            alert(
+              "Selecione seu objetivo para continuar."
+            );
+
+            scrollParaObjetivo();
+            return;
+          }
+
+          if (!formulario.horario) {
+            alert(
+              "Selecione os horários das refeições para continuar."
+            );
+
+            scrollParaHorario();
+            return;
+          }
+
+          if (!formulario.sexo) {
+            alert(
+              "Selecione seu gênero para continuar."
+            );
+
+            scrollParaSexo();
+            return;
+          }
+
+          if (!formulario.rotina) {
+  alert(
+    "Selecione como é sua rotina para continuar."
+  );
+  return;
+}
+
+if (!formulario.atividade) {
+  alert(
+    "Selecione a quantidade de atividade atual para continuar."
+  );
+  return;
+}
+
+if (!formulario.treino) {
+  alert(
+    "Selecione se deseja treino para continuar."
+  );
+  return;
+}
+
+          if (cafeSelecionados.length < 3) {
+            alert(
+              "Selecione pelo menos 3 opções de café da manhã para continuar."
+            );
+
+            scrollParaCafe();
+            return;
+          }
+
+          if (almocoSelecionados.length < 3) {
+            alert(
+              "Selecione pelo menos 3 opções de almoço para continuar."
+            );
+
+            scrollParaAlmoco();
+            return;
+          }
+
+          if (lancheSelecionados.length < 3) {
+            alert(
+              "Selecione pelo menos 3 opções de lanche da tarde para continuar."
+            );
+
+            scrollParaLanche();
+            return;
+          }
+
+          if (jantaSelecionados.length < 3) {
+            alert(
+              "Selecione pelo menos 3 opções de janta para continuar."
+            );
+
+            scrollParaJanta();
+            return;
+          }
+
+          console.log(
+            "🟢 Indo para a página de pacotes..."
+          );
+
+          router.push("/pacotes");
+        }}
+      >
+        Montar minha dieta →
+      </button>
+
+      <p style={pagamento}>
+        Pagamento seguro 🔒
+      </p>
+
     </div>
   );
 }
@@ -490,7 +1296,15 @@ function CardSection({
 }) {
   return (
     <div style={sectionCard}>
-      <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
+      <h2
+        style={{
+          margin: 0,
+          fontSize: 18,
+        }}
+      >
+        {title}
+      </h2>
+
       {children}
     </div>
   );
@@ -504,23 +1318,39 @@ const cafe = [
   "🥖 Pão + frango",
   "🥚 Pão + ovo",
   "🧀 Pão + queijo",
-  "🥪 Pão + presunto",
-  "🫓 Tapioca",
+  "🥪 Pão + presunto + queijo",
+  "🫓 Tapioca de queijo",
+  "🍗 Tapioca de frango",
+  "🌽 Cuscuz + ovo",
+  "🧀 Pão de queijo",
   "🍳 Omelete",
   "🍎 Maçã",
   "🍌 Banana",
+  "🥭 Mamão",
+  "☕ Café + leite desnatado",
   "☕ Café",
+  "🥛 Iogurte",
 ];
 
 const almoco = [
   "🍚 Arroz",
-  "🫘 Feijão",
+  "🫘 Feijão preto",
+  "🌽 Cuscuz",
   "🍝 Macarrão",
   "🍠 Batata doce",
-  "🍗 Frango",
-  "🥩 Carne",
+  "🥔 Mandioca",
+  "🥔 Inhame",
+  "🥔 Batata inglesa",
+  "🎃 Abóbora",
+  "🍗 Frango grelhado",
+  "🥩 Carne assada",
+  "🥩 Carne grelhada",
+  "🥩 Carne de porco Lombo",
+  "🥩 Patinho moído",
   "🐟 Peixe",
-  "🥗 Salada",
+  "🥗 Salada de alface e tomate",
+  "🥬 Salada de alface",
+  "🥗 Salada de legumes",
 ];
 
 /* =========================
@@ -564,14 +1394,21 @@ const card = {
   cursor: "pointer",
 };
 
-const row = { display: "flex", gap: 10 };
+const row = {
+  display: "flex",
+  gap: 10,
+};
 
 const sexoBtn = (active: boolean) => ({
   flex: 1,
   padding: 12,
   borderRadius: 10,
-  border: active ? "2px solid green" : "1px solid #ccc",
-  background: active ? "#dcfce7" : "white",
+  border: active
+    ? "2px solid green"
+    : "1px solid #ccc",
+  background: active
+    ? "#dcfce7"
+    : "white",
 });
 
 const ofertaContainer = {
@@ -581,13 +1418,25 @@ const ofertaContainer = {
   marginTop: 35,
 };
 
-const ofertaTitulo = { fontSize: 22, fontWeight: 800 };
+const ofertaTitulo = {
+  fontSize: 22,
+  fontWeight: 800,
+};
 
-const social = { display: "flex", alignItems: "center", marginTop: 15 };
+const social = {
+  display: "flex",
+  alignItems: "center",
+  marginTop: 15,
+};
 
-const socialLeft = { display: "flex", gap: 6 };
+const socialLeft = {
+  display: "flex",
+  gap: 6,
+};
 
-const socialRight = { fontSize: 14 };
+const socialRight = {
+  fontSize: 14,
+};
 
 const avatarMini = {
   width: 28,
@@ -625,7 +1474,11 @@ const carouselImage = {
   borderRadius: 12,
 };
 
-const dots = { display: "flex", justifyContent: "center", gap: 8 };
+const dots = {
+  display: "flex",
+  justifyContent: "center",
+  gap: 8,
+};
 
 const dot = {
   width: 8,
@@ -634,13 +1487,24 @@ const dot = {
   background: "#16a329",
 };
 
-const linha = { height: 1, background: "#eee", margin: "20px 0" };
+const linha = {
+  height: 1,
+  background: "#eee",
+  margin: "20px 0",
+};
 
-const ofertaInfo = { display: "flex" };
+const ofertaInfo = {
+  display: "flex",
+};
 
-const precoBox = { width: 150, borderRight: "1px solid #ddd" };
+const precoBox = {
+  width: 150,
+  borderRight: "1px solid #ddd",
+};
 
-const beneficios = { paddingLeft: 20 };
+const beneficios = {
+  paddingLeft: 20,
+};
 
 const btnFinal = {
   marginTop: 25,
