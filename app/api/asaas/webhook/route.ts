@@ -1,174 +1,168 @@
-import { NextResponse } from "next/server";
-import { adminDb } from "@/app/lib/firebase-admin";
+import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
+import { adminDb } from "@/app/lib/firebase-admin";
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
+    // =========================
+    // 1. VALIDAR TOKEN DO ASAAS
+    // =========================
 
-    console.log("=================================");
-    console.log("WEBHOOK ASAAS RECEBIDO");
-    console.log("=================================");
-    console.log(JSON.stringify(body, null, 2));
+    const tokenRecebido = req.headers.get("asaas-access-token");
+    const tokenEsperado = process.env.ASAAS_WEBHOOK_TOKEN;
 
-    const evento = body?.event;
-    const pagamento = body?.payment;
-
-    if (!evento || !pagamento) {
+    if (!tokenEsperado) {
+      console.error("❌ ASAAS_WEBHOOK_TOKEN não configurado.");
       return NextResponse.json(
-        {
-          sucesso: true,
-          mensagem: "Webhook recebido, mas sem dados de pagamento.",
-        },
-        { status: 200 }
+        { erro: "Webhook não configurado." },
+        { status: 500 }
       );
     }
 
-    console.log("Evento:", evento);
-    console.log("Pagamento:", pagamento);
+    if (!tokenRecebido || tokenRecebido !== tokenEsperado) {
+      console.error("❌ Token do webhook inválido.");
+      return NextResponse.json(
+        { erro: "Não autorizado." },
+        { status: 401 }
+      );
+    }
 
-    /*
-     * Estamos interessados principalmente
-     * quando o PIX foi efetivamente recebido.
-     */
+    // =========================
+    // 2. LER EVENTO
+    // =========================
+
+    const body = await req.json();
+
+    console.log("🔔 Webhook Asaas recebido:", body.event);
+
+    const eventoId = body.id;
+    const evento = body.event;
+    const pagamento = body.payment;
+
+    if (!eventoId) {
+      console.error("❌ Evento sem ID.");
+      return NextResponse.json(
+        { erro: "Evento sem ID." },
+        { status: 400 }
+      );
+    }
+
+    // =========================
+    // 3. EVITAR PROCESSAMENTO DUPLICADO
+    // =========================
+
+    const eventoRef = adminDb.collection("webhook_eventos").doc(eventoId);
+
+    const eventoExistente = await eventoRef.get();
+
+    if (eventoExistente.exists) {
+      console.log("ℹ️ Evento já processado:", eventoId);
+
+      return NextResponse.json({
+        recebido: true,
+        duplicado: true,
+      });
+    }
+
+    // =========================
+    // 4. EVENTOS DE PAGAMENTO
+    // =========================
+
     if (
       evento !== "PAYMENT_RECEIVED" &&
       evento !== "PAYMENT_CONFIRMED"
     ) {
+      await eventoRef.set({
+        evento,
+        processadoEm: FieldValue.serverTimestamp(),
+      });
+
+      console.log("ℹ️ Evento ignorado:", evento);
+
+      return NextResponse.json({
+        recebido: true,
+        ignorado: true,
+      });
+    }
+
+    if (!pagamento) {
+      console.error("❌ Evento sem pagamento.");
       return NextResponse.json(
-        {
-          sucesso: true,
-          mensagem: "Evento recebido e não processado.",
-        },
-        { status: 200 }
+        { erro: "Pagamento não encontrado." },
+        { status: 400 }
       );
     }
+
+    // =========================
+    // 5. IDENTIFICAR PEDIDO
+    // =========================
 
     const pixQrCodeId = pagamento.pixQrCodeId;
 
     if (!pixQrCodeId) {
-      console.error(
-        "Pagamento recebido sem pixQrCodeId."
-      );
-
+      console.error("❌ pixQrCodeId não encontrado.");
       return NextResponse.json(
-        {
-          sucesso: true,
-          mensagem: "Pagamento sem pixQrCodeId.",
-        },
-        { status: 200 }
+        { erro: "pixQrCodeId não encontrado." },
+        { status: 400 }
       );
     }
 
-    /*
-     * Procura o pedido que criou esse QR Code.
-     */
-    const pedidosSnapshot = await adminDb
+    const pedidosRef = adminDb
       .collection("pedidos")
       .where("pixQrCodeId", "==", pixQrCodeId)
-      .limit(1)
-      .get();
+      .limit(1);
+
+    const pedidosSnapshot = await pedidosRef.get();
 
     if (pedidosSnapshot.empty) {
       console.error(
-        "Nenhum pedido encontrado para o pixQrCodeId:",
+        "❌ Pedido não encontrado para pixQrCodeId:",
         pixQrCodeId
       );
 
       return NextResponse.json(
-        {
-          sucesso: true,
-          mensagem: "Pedido não encontrado.",
-        },
-        { status: 200 }
+        { erro: "Pedido não encontrado." },
+        { status: 404 }
       );
     }
 
     const pedidoDoc = pedidosSnapshot.docs[0];
 
-    const pedido = pedidoDoc.data();
+    // =========================
+    // 6. MARCAR PEDIDO COMO PAGO
+    // =========================
 
-    /*
-     * Evita processar novamente um pedido já pago.
-     */
-    if (pedido.status === "pago") {
-      console.log(
-        "Pedido já estava marcado como pago:",
-        pedidoDoc.id
-      );
-
-      return NextResponse.json(
-        {
-          sucesso: true,
-          mensagem: "Pedido já processado.",
-        },
-        { status: 200 }
-      );
-    }
-
-    /*
-     * Atualiza o pedido.
-     */
     await pedidoDoc.ref.update({
       status: "pago",
-
-      asaasPaymentId: pagamento.id || null,
-
-      pagamentoConfirmadoEm:
-        FieldValue.serverTimestamp(),
-
-      valorPago: pagamento.value || pedido.valor,
-
-      updatedAt:
-        FieldValue.serverTimestamp(),
-    });
-
-    console.log("=================================");
-    console.log("PAGAMENTO CONFIRMADO");
-    console.log("=================================");
-    console.log({
-      pedidoId: pedidoDoc.id,
-      uid: pedido.uid,
-      email: pedido.email,
-      plano: pedido.plano,
-      valor: pagamento.value,
       asaasPaymentId: pagamento.id,
+      pagamentoConfirmadoEm: FieldValue.serverTimestamp(),
+      valorPago: pagamento.value,
+      updatedAt: FieldValue.serverTimestamp(),
     });
 
-    /*
-     * Por enquanto apenas marcamos como pago.
-     *
-     * Depois vamos usar este ponto para:
-     *
-     * - liberar o produto;
-     * - gerar/salvar a dieta;
-     * - enviar o acesso;
-     * - atualizar a conta do cliente.
-     */
+    // =========================
+    // 7. REGISTRAR EVENTO
+    // =========================
 
-    return NextResponse.json(
-      {
-        sucesso: true,
-        pedidoId: pedidoDoc.id,
-        status: "pago",
-      },
-      { status: 200 }
-    );
+    await eventoRef.set({
+      evento,
+      pagamentoId: pagamento.id,
+      pedidoId: pedidoDoc.id,
+      processadoEm: FieldValue.serverTimestamp(),
+    });
+
+    console.log("✅ Pagamento confirmado:", pagamento.id);
+    console.log("✅ Pedido atualizado:", pedidoDoc.id);
+
+    return NextResponse.json({
+      recebido: true,
+      processado: true,
+    });
   } catch (error) {
-    console.error(
-      "Erro no Webhook Asaas:",
-      error
-    );
+    console.error("❌ Erro no webhook Asaas:", error);
 
-    /*
-     * Mesmo em alguns erros de processamento,
-     * não vamos expor detalhes internos.
-     */
     return NextResponse.json(
-      {
-        erro: true,
-        mensagem: "Erro ao processar webhook.",
-      },
+      { erro: "Erro interno no webhook." },
       { status: 500 }
     );
   }
