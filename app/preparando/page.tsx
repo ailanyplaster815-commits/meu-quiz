@@ -12,6 +12,8 @@ const etapas = [
 ];
 
 export default function Preparando() {
+  console.log("🔥 ENTROU NA PÁGINA PREPARANDO!");
+
   const router = useRouter();
 
   const [progresso, setProgresso] = useState(0);
