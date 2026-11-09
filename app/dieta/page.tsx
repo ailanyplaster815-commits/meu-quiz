@@ -28,7 +28,7 @@ export default function Dieta() {
 
       if (!snap.exists()) {
         alert("Você ainda não possui acesso à dieta.");
-        router.push("/pacotes");
+        router.push("/preparando");
         return;
       }
 

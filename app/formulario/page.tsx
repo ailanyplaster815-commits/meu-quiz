@@ -33,109 +33,74 @@ export default function Formulario() {
   const [lancheSelecionados, setLancheSelecionados] = useState<string[]>([]);
   const [jantaSelecionados, setJantaSelecionados] = useState<string[]>([]);
 
-  /* =========================
-     SALVAR FORMULÁRIO
-  ========================= */
-
   const salvarFormulario = async () => {
-    console.log("========== INÍCIO DO SALVAMENTO ==========");
-    console.log("Formulário atual:", formulario);
+  console.log("🔵 1. Função salvarFormulario iniciada");
 
-    try {
-      if (!authCarregado) {
-        console.log("⏳ Firebase Auth ainda carregando...");
-        alert("Aguarde o carregamento do usuário...");
-        return;
-      }
-
-      const user = auth.currentUser;
-
-      console.log("Usuário atual:", user);
-
-      if (!user) {
-        console.log("❌ Nenhum usuário autenticado.");
-        alert("Usuário não autenticado. Faça login novamente.");
-        return;
-      }
-
-      console.log("UID:", user.uid);
-      console.log("Email:", user.email);
-
-      const dadosQuiz = {
-        peso: formulario.peso,
-        altura: formulario.altura,
-        idade: formulario.idade,
-        objetivo: formulario.objetivo,
-        sexo: formulario.sexo,
-        horario: formulario.horario,
-        rotina: formulario.rotina,
-        atividade: formulario.atividade,
-        treino: formulario.treino,
-        observacao: formulario.observacao,
-        alimentos: formulario.alimentos,
-
-        uid: user.uid,
-        email: user.email,
-        nome: user.displayName,
-        foto: user.photoURL,
-
-        etapa: "questionario",
-        updatedAt: new Date(),
-      };
-
-      console.log("📦 Salvando questionário no Firebase...");
-
-      await setDoc(
-        doc(db, "quizzes", user.uid),
-        dadosQuiz,
-        { merge: true }
-      );
-
-      console.log("✅ QUIZ SALVO COM SUCESSO!");
-
-      /* =========================
-         GERAR DIETA COM IA
-      ========================= */
-
-      console.log("🤖 Enviando questionário para o Gemini...");
-
-      const response = await fetch("/api/gerar-dieta", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formulario),
-      });
-
-      const resultado = await response.json();
-
-      console.log("📥 Resposta da IA:", resultado);
-
-      if (!response.ok || !resultado.sucesso) {
-        throw new Error(
-          resultado.erro || "Não foi possível gerar a dieta."
-        );
-      }
-
-      console.log("✅ DIETA GERADA COM SUCESSO!");
-      console.log(resultado.dieta);
-
-      localStorage.setItem(
-        "dietaGerada",
-        JSON.stringify(resultado.dieta)
-      );
-
-      router.push("/preparando");
-    } catch (error) {
-      console.error("❌ ERRO NO PROCESSO:");
-      console.error(error);
-
-      alert(
-        "Não foi possível montar sua dieta agora. Veja o console para mais detalhes."
-      );
+  try {
+    if (!authCarregado) {
+      console.log("🔴 2. Firebase Auth ainda está carregando");
+      alert("Aguarde o carregamento do usuário...");
+      return;
     }
-  };
 
+    const user = auth.currentUser;
+
+    console.log("🔵 3. Usuário atual:", user?.uid);
+
+    if (!user) {
+      console.log("🔴 4. Usuário não autenticado");
+      alert("Usuário não autenticado. Faça login novamente.");
+      return;
+    }
+
+    console.log("🔵 5. Antes de salvar no Firebase");
+
+
+    console.log("UID:", user.uid);
+    console.log("Email:", user.email);
+
+    const dadosQuiz = {
+      peso: formulario.peso,
+      altura: formulario.altura,
+      idade: formulario.idade,
+      objetivo: formulario.objetivo,
+      sexo: formulario.sexo,
+      horario: formulario.horario,
+      rotina: formulario.rotina,
+      atividade: formulario.atividade,
+      treino: formulario.treino,
+      observacao: formulario.observacao,
+      alimentos: formulario.alimentos,
+
+      uid: user.uid,
+      email: localStorage.getItem("emailCliente") || user.email || "",      nome: user.displayName,
+      foto: user.photoURL,
+
+      etapa: "questionario",
+      updatedAt: new Date(),
+    };
+
+    
+
+
+console.log("📦 Salvando questionário no Firebase...");
+
+await setDoc(
+  doc(db, "quizzes", user.uid),
+  dadosQuiz,
+  { merge: true }
+);
+
+console.log("🟢 Questionário salvo no Firebase");
+
+console.log("🧭 SEUNUTRI: navegando para /preparando");
+router.replace("/preparando");
+
+} catch (erro) {
+  console.error("❌ Erro ao salvar questionário:", erro);
+  alert("Não foi possível salvar seus dados. Tente novamente.");
+}
+};
   /* =========================
      CARREGAR FORMULÁRIO
   ========================= */
@@ -1152,126 +1117,91 @@ function OfertaFinal({
         }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        onClick={() => {
+        
+onClick={async () => {
+  console.log("🟡 Iniciando validações do formulário...");
 
-          if (!formulario.peso) {
-            alert(
-              "Preencha seu peso para continuar."
-            );
+  if (!formulario.peso) {
+    alert("Preencha seu peso para continuar.");
+    scrollParaPeso();
+    return;
+  }
 
-            scrollParaPeso();
-            return;
-          }
+  if (!formulario.altura) {
+    alert("Preencha sua altura para continuar.");
+    scrollParaAltura();
+    return;
+  }
 
-          if (!formulario.altura) {
-            alert(
-              "Preencha sua altura para continuar."
-            );
+  if (!formulario.idade) {
+    alert("Preencha sua idade para continuar.");
+    scrollParaIdade();
+    return;
+  }
 
-            scrollParaAltura();
-            return;
-          }
+  if (!formulario.objetivo) {
+    alert("Selecione seu objetivo para continuar.");
+    scrollParaObjetivo();
+    return;
+  }
 
-          if (!formulario.idade) {
-            alert(
-              "Preencha sua idade para continuar."
-            );
+  if (!formulario.horario) {
+    alert("Selecione os horários das refeições para continuar.");
+    scrollParaHorario();
+    return;
+  }
 
-            scrollParaIdade();
-            return;
-          }
+  if (!formulario.sexo) {
+    alert("Selecione seu gênero para continuar.");
+    scrollParaSexo();
+    return;
+  }
 
-          if (!formulario.objetivo) {
-            alert(
-              "Selecione seu objetivo para continuar."
-            );
+  if (!formulario.rotina) {
+    alert("Selecione como é sua rotina para continuar.");
+    return;
+  }
 
-            scrollParaObjetivo();
-            return;
-          }
+  if (!formulario.atividade) {
+    alert("Selecione a quantidade de atividade atual para continuar.");
+    return;
+  }
 
-          if (!formulario.horario) {
-            alert(
-              "Selecione os horários das refeições para continuar."
-            );
+  if (!formulario.treino) {
+    alert("Selecione se deseja treino para continuar.");
+    return;
+  }
 
-            scrollParaHorario();
-            return;
-          }
+  if (cafeSelecionados.length < 3) {
+    alert("Selecione pelo menos 3 opções de café da manhã para continuar.");
+    scrollParaCafe();
+    return;
+  }
 
-          if (!formulario.sexo) {
-            alert(
-              "Selecione seu gênero para continuar."
-            );
+  if (almocoSelecionados.length < 3) {
+    alert("Selecione pelo menos 3 opções de almoço para continuar.");
+    scrollParaAlmoco();
+    return;
+  }
 
-            scrollParaSexo();
-            return;
-          }
+  if (lancheSelecionados.length < 3) {
+    alert("Selecione pelo menos 3 opções de lanche da tarde para continuar.");
+    scrollParaLanche();
+    return;
+  }
 
-          if (!formulario.rotina) {
-  alert(
-    "Selecione como é sua rotina para continuar."
-  );
-  return;
-}
+  if (jantaSelecionados.length < 3) {
+    alert("Selecione pelo menos 3 opções de janta para continuar.");
+    scrollParaJanta();
+    return;
+  }
 
-if (!formulario.atividade) {
-  alert(
-    "Selecione a quantidade de atividade atual para continuar."
-  );
-  return;
-}
+  console.log("🟢 Validações concluídas!");
+  console.log("🟢 Chamando salvarFormulario...");
 
-if (!formulario.treino) {
-  alert(
-    "Selecione se deseja treino para continuar."
-  );
-  return;
-}
-
-          if (cafeSelecionados.length < 3) {
-            alert(
-              "Selecione pelo menos 3 opções de café da manhã para continuar."
-            );
-
-            scrollParaCafe();
-            return;
-          }
-
-          if (almocoSelecionados.length < 3) {
-            alert(
-              "Selecione pelo menos 3 opções de almoço para continuar."
-            );
-
-            scrollParaAlmoco();
-            return;
-          }
-
-          if (lancheSelecionados.length < 3) {
-            alert(
-              "Selecione pelo menos 3 opções de lanche da tarde para continuar."
-            );
-
-            scrollParaLanche();
-            return;
-          }
-
-          if (jantaSelecionados.length < 3) {
-            alert(
-              "Selecione pelo menos 3 opções de janta para continuar."
-            );
-
-            scrollParaJanta();
-            return;
-          }
-
-          console.log(
-            "🟢 Indo para a página de pacotes..."
-          );
-
-          router.push("/pacotes");
-        }}
-      >
+  await salvarFormulario();
+          
+}}>
         Montar minha dieta →
       </button>
 

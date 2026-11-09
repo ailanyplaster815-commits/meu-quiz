@@ -26,38 +26,45 @@ export default function CheckoutPage() {
   const [pixCopiaCola, setPixCopiaCola] = useState("");
 
   useEffect(() => {
-    const precoSalvo = localStorage.getItem("precoTotal");
-    const planoSalvo = localStorage.getItem("planoSelecionado");
+  const precoSalvo = localStorage.getItem("precoTotal");
+  const planoSalvo = localStorage.getItem("planoSelecionado");
+  const emailSalvo = localStorage.getItem("emailCliente");
 
-    if (precoSalvo) {
-      setPreco(Number(precoSalvo));
-    }
+  if (precoSalvo) {
+    setPreco(Number(precoSalvo));
+  }
 
-    if (planoSalvo) {
-      setPlano(planoSalvo);
-    }
+  if (planoSalvo) {
+    setPlano(planoSalvo);
+  }
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log("USUÁRIO FIREBASE:", user);
+  // Primeiro tenta usar o e-mail informado na página inicial
+  if (emailSalvo) {
+    setEmail(emailSalvo);
+  }
 
-      if (user) {
-        console.log("UID ENCONTRADO:", user.uid);
+  const unsubscribe = onAuthStateChanged(auth, (user) => {
+    console.log("USUÁRIO FIREBASE:", user);
 
-        setUid(user.uid);
+    if (user) {
+      console.log("UID ENCONTRADO:", user.uid);
 
-        if (user.email) {
-          setEmail(user.email);
-        }
-      } else {
-        console.log("NENHUM USUÁRIO LOGADO");
+      setUid(user.uid);
 
-        setUid("");
-        setEmail("");
+      // Só usa o e-mail do Firebase se não houver
+      // um e-mail informado pelo cliente na página inicial
+      if (!emailSalvo && user.email) {
+        setEmail(user.email);
       }
-    });
+    } else {
+      console.log("NENHUM USUÁRIO LOGADO");
 
-    return () => unsubscribe();
-  }, []);
+      setUid("");
+    }
+  });
+
+  return () => unsubscribe();
+}, []);
 
   async function finalizarPagamento() {
     if (!uid) {
@@ -259,12 +266,16 @@ export default function CheckoutPage() {
             </label>
 
             <input
-              type="email"
-              value={email}
-              readOnly
-              placeholder="Seu e-mail"
-              className="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-700 outline-none"
-            />
+  type="email"
+  value={email}
+  onChange={(e) => {
+    const novoEmail = e.target.value;
+    setEmail(novoEmail);
+    localStorage.setItem("emailCliente", novoEmail);
+  }}
+  placeholder="Seu e-mail"
+  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-700 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+/>
 
             <p className="mt-2 text-xs text-gray-500">
               Este é o e-mail usado para acessar sua conta no Seu Nutri.

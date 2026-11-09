@@ -52,6 +52,8 @@ export default function Home() {
         })
       );
 
+      localStorage.setItem("emailCliente", emailLimpo);
+
       router.push("/formulario");
     } catch (error) {
       console.error(error);
@@ -68,6 +70,8 @@ export default function Home() {
       setMensagem("");
 
       const usuario = await loginComGoogle();
+
+      localStorage.setItem("emailCliente", usuario.email);
 
       await salvarLead({
         email: usuario.email,
@@ -198,7 +202,7 @@ export default function Home() {
           {/* TÍTULO */}
           <div className="text-center mb-7">
             <h1 className="text-[25px] font-semibold text-gray-900">
-              Bem-vindo de volta
+              Seja Bem-vindo
             </h1>
 
             <p className="mt-2 text-sm text-gray-500">
