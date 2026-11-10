@@ -93,6 +93,11 @@ await setDoc(
 
 console.log("🟢 Questionário salvo no Firebase");
 
+// Atualiza o objetivo escolhido pelo usuário
+localStorage.setItem("objetivo", formulario.objetivo);
+
+console.log("🎯 Objetivo salvo:", formulario.objetivo);
+
 console.log("🧭 SEUNUTRI: navegando para /preparando");
 router.replace("/preparando");
 
