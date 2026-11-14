@@ -496,8 +496,8 @@ Escolher Plano
 
   <button
     onClick={() => {
-      setPlanoSelecionado("consulta_completa");
-    }}
+  irParaCheckout("consulta_completa", 19.99, 0);
+}}
     style={{
       width: "70%",
       padding: 12,

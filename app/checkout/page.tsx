@@ -16,6 +16,13 @@ export default function CheckoutPage() {
   const [email, setEmail] = useState("");
   const [uid, setUid] = useState("");
   const [cpf, setCpf] = useState("");
+    const [nomeTitular, setNomeTitular] = useState("");
+  const [numeroCartao, setNumeroCartao] = useState("");
+  const [validade, setValidade] = useState("");
+  const [cvv, setCvv] = useState("");
+  const [cep, setCep] = useState("");
+  const [numeroEndereco, setNumeroEndereco] = useState("");
+  const [telefone, setTelefone] = useState("");
   const [carregando, setCarregando] = useState(false);
 
   const [preco, setPreco] = useState(0);
@@ -84,26 +91,79 @@ export default function CheckoutPage() {
       return;
     }
 
-    if (pagamento === "cartao" && !cpf.trim()) {
-      alert("Digite seu CPF.");
-      return;
+        if (pagamento === "cartao") {
+      if (
+        !nomeTitular.trim() ||
+        !cpf.trim() ||
+        !numeroCartao.trim() ||
+        !validade.trim() ||
+        !cvv.trim() ||
+        !cep.trim() ||
+        !numeroEndereco.trim() ||
+        !telefone.trim()
+      ) {
+        alert("Preencha todos os dados do cartão e do titular.");
+        return;
+      }
+
+      if (numeroCartao.replace(/\D/g, "").length < 13) {
+        alert("Verifique o número do cartão.");
+        return;
+      }
+
+      if (!/^\d{2}\/\d{2}$/.test(validade)) {
+        alert("Informe a validade no formato MM/AA.");
+        return;
+      }
+
+      if (cvv.replace(/\D/g, "").length < 3) {
+        alert("Verifique o código de segurança do cartão.");
+        return;
+      }
     }
 
     setCarregando(true);
 
-    try {
-      const resposta = await fetch("/api/asaas", {
+    try {      const usuario = auth.currentUser;
+
+      if (!usuario) {
+        alert("Sua sessão expirou. Atualize a página e tente novamente.");
+        return;
+      }
+
+      const token = await usuario.getIdToken();
+            const resposta = await fetch("/api/asaas", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          uid: uid,
-          email: email,
-          cpfCnpj: pagamento === "cartao" ? cpf : undefined,
+          uid,
+          email,
           valor: preco,
-          plano: plano,
-          pagamento: pagamento,
+plano,
+valorUpsell: localStorage.getItem("valorUpsell") || "0",
+pagamento,
+
+          ...(pagamento === "cartao" && {
+            cpfCnpj: cpf.replace(/\D/g, ""),
+            creditCard: {
+              holderName: nomeTitular,
+              number: numeroCartao.replace(/\D/g, ""),
+              expiryMonth: validade.split("/")[0],
+              expiryYear: `20${validade.split("/")[1]}`,
+              ccv: cvv,
+            },
+            creditCardHolderInfo: {
+              name: nomeTitular,
+              email,
+              cpfCnpj: cpf.replace(/\D/g, ""),
+              postalCode: cep.replace(/\D/g, ""),
+              addressNumber: numeroEndereco,
+              phone: telefone.replace(/\D/g, ""),
+            },
+          }),
         }),
       });
 
@@ -217,12 +277,138 @@ export default function CheckoutPage() {
                 </p>
               </div>
 
-              {pagamento === "cartao" && (
-                <CheckCircle2
-                  size={20}
-                  className="shrink-0 text-green-600"
-                />
-              )}
+                        {pagamento === "cartao" && (
+            <div className="mt-6">
+              <h2 className="mb-4 text-lg font-bold text-gray-900">
+                Dados do Cartão
+              </h2>
+
+              <p className="mb-4 text-sm font-medium text-green-700">
+                Crédito à vista — 1x
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Nome do titular
+                  </label>
+                  <input
+                    type="text"
+                    value={nomeTitular}
+                    onChange={(e) => setNomeTitular(e.target.value)}
+                    placeholder="Nome impresso no cartão"
+                    autoComplete="cc-name"
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-green-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Número do cartão
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={numeroCartao}
+                    onChange={(e) =>
+                      setNumeroCartao(e.target.value.replace(/\D/g, "").slice(0, 19))
+                    }
+                    placeholder="0000 0000 0000 0000"
+                    autoComplete="cc-number"
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-green-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Validade
+                    </label>
+                    <input
+                      type="text"
+                      value={validade}
+                      onChange={(e) => {
+                        const valor = e.target.value.replace(/\D/g, "").slice(0, 4);
+                        setValidade(
+                          valor.length > 2
+                            ? `${valor.slice(0, 2)}/${valor.slice(2)}`
+                            : valor
+                        );
+                      }}
+                      placeholder="MM/AA"
+                      autoComplete="cc-exp"
+                      className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-green-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      CVV
+                    </label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      value={cvv}
+                      onChange={(e) =>
+                        setCvv(e.target.value.replace(/\D/g, "").slice(0, 4))
+                      }
+                      placeholder="123"
+                      autoComplete="cc-csc"
+                      className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-green-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    CEP do titular
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={cep}
+                    onChange={(e) =>
+                      setCep(e.target.value.replace(/\D/g, "").slice(0, 8))
+                    }
+                    placeholder="00000-000"
+                    autoComplete="postal-code"
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-green-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Número do endereço
+                  </label>
+                  <input
+                    type="text"
+                    value={numeroEndereco}
+                    onChange={(e) => setNumeroEndereco(e.target.value)}
+                    placeholder="Número da residência"
+                    autoComplete="address-line2"
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-green-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Telefone
+                  </label>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    value={telefone}
+                    onChange={(e) =>
+                      setTelefone(e.target.value.replace(/\D/g, "").slice(0, 11))
+                    }
+                    placeholder="DDD + telefone"
+                    autoComplete="tel"
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-green-500"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
             </button>
           </div>
         </section>

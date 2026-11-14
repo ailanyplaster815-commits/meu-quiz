@@ -1,155 +1,168 @@
+
 import { NextResponse } from "next/server";
-import { adminDb } from "@/app/lib/firebase-admin";
+import { adminDb, adminAuth } from "@/app/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 
 const ASAAS_API = "https://api.asaas.com/v3";
 
+// Preços definidos no servidor
+const PLANOS: Record<
+  string,
+  { valor: number; upsells: number[] }
+> = {
+  plano_objetivo: { valor: 9.99, upsells: [0, 5.99] },
+  dieta_treino: { valor: 14.99, upsells: [0, 5.99] },
+  plano_completo: { valor: 15.99, upsells: [0, 2.99] },
+  consulta_completa: { valor: 19.99, upsells: [0] },
+};
+
 export async function POST(request: Request) {
   try {
+    // 1. VALIDAR AUTENTICAÇÃO FIREBASE
+
+    const authorization = request.headers.get("authorization");
+    const token = authorization?.startsWith("Bearer ")
+      ? authorization.substring(7)
+      : null;
+
+    if (!token) {
+      return NextResponse.json(
+        { erro: true, mensagem: "Autenticação necessária." },
+        { status: 401 }
+      );
+    }
+
+    let usuario;
+
+    try {
+      usuario = await adminAuth.verifyIdToken(token);
+    } catch {
+      return NextResponse.json(
+        { erro: true, mensagem: "Sessão inválida ou expirada." },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
 
-    const apiKey = process.env.ASAAS_API_KEY;
-    const pixKey = process.env.ASAAS_PIX_KEY;
-
-    // =========================
-    // DADOS RECEBIDOS
-    // =========================
-
-    const uid = body.uid;
-    const email = body.email;
-    const plano = body.plano;
+    const uid = usuario.uid;
+    const email = String(body.email || "").trim().toLowerCase();
+    const plano = String(body.plano || "");
     const pagamento = body.pagamento;
-    const valor = Number(body.valor);
 
-    // =========================
-    // VALIDAÇÕES
-    // =========================
-
-    if (!uid) {
+    if (body.uid && body.uid !== uid) {
       return NextResponse.json(
-        {
-          erro: true,
-          mensagem: "Usuário não identificado.",
-        },
-        { status: 400 }
+        { erro: true, mensagem: "Usuário inválido." },
+        { status: 403 }
       );
     }
 
-    if (!email) {
-      return NextResponse.json(
-        {
-          erro: true,
-          mensagem: "E-mail não informado.",
-        },
-        { status: 400 }
-      );
-    }
+    // 2. VALIDAR DADOS
 
-    if (!apiKey) {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json(
-        {
-          erro: true,
-          mensagem: "ASAAS_API_KEY não encontrada.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!pixKey) {
-      return NextResponse.json(
-        {
-          erro: true,
-          mensagem: "ASAAS_PIX_KEY não encontrada.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!valor || valor <= 0) {
-      return NextResponse.json(
-        {
-          erro: true,
-          mensagem: "Valor inválido.",
-        },
+        { erro: true, mensagem: "E-mail inválido." },
         { status: 400 }
       );
     }
 
     if (pagamento !== "pix") {
       return NextResponse.json(
-        {
-          erro: true,
-          mensagem:
-            "Neste momento, somente o pagamento via PIX está disponível.",
-        },
+        { erro: true, mensagem: "Pagamento por cartão será habilitado na próxima etapa." },
         { status: 400 }
       );
     }
 
-    // =========================
-    // PEDIDO
-    // =========================
+    const configuracaoPlano = PLANOS[plano];
+
+    if (!configuracaoPlano) {
+      return NextResponse.json(
+        { erro: true, mensagem: "Plano inválido." },
+        { status: 400 }
+      );
+    }
+
+    // 3. CALCULAR PREÇO NO SERVIDOR
+
+    const valorUpsellCentavos = Math.round(
+      Number(body.valorUpsell ?? 0) * 100
+    );
+
+    const upsellsPermitidos = configuracaoPlano.upsells.map(
+      (valor) => Math.round(valor * 100)
+    );
+
+    if (
+      !Number.isFinite(valorUpsellCentavos) ||
+      !upsellsPermitidos.includes(valorUpsellCentavos)
+    ) {
+      return NextResponse.json(
+        { erro: true, mensagem: "Adicional inválido." },
+        { status: 400 }
+      );
+    }
+
+    const valorCentavos =
+      Math.round(configuracaoPlano.valor * 100) +
+      valorUpsellCentavos;
+
+    const valor = valorCentavos / 100;
+
+    // 4. VALIDAR CONFIGURAÇÃO ASAAS
+
+    const apiKey = process.env.ASAAS_API_KEY;
+    const pixKey = process.env.ASAAS_PIX_KEY;
+
+    if (!apiKey || !pixKey) {
+      console.error("Configuração do PIX não encontrada.");
+
+      return NextResponse.json(
+        { erro: true, mensagem: "Configuração do pagamento indisponível." },
+        { status: 500 }
+      );
+    }
+
+    // PIX permanece em PRODUÇÃO
+
+    const ambiente = "producao";
+
+    // 5. CRIAR PEDIDO
 
     const pedidoId = `PED_${crypto.randomUUID()}`;
 
-    await adminDb
-      .collection("pedidos")
-      .doc(pedidoId)
-      .set({
-        uid,
-        email,
-        plano: plano || null,
-        valor,
-        pagamento: "pix",
+    const pedidoRef = adminDb.collection("pedidos").doc(pedidoId);
 
-        status: "pendente",
-
-        externalReference: pedidoId,
-
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-
-    console.log("=================================");
-    console.log("PEDIDO CRIADO");
-    console.log("=================================");
-    console.log({
-      pedidoId,
+    await pedidoRef.set({
       uid,
       email,
       plano,
       valor,
-      pagamento,
+      valorUpsell: valorUpsellCentavos / 100,
+      pagamento: "pix",
+      ambiente,
+      status: "pendente",
+      externalReference: pedidoId,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
 
-    // =========================
-    // CRIAR QR CODE PIX
-    // =========================
+    // 6. GERAR QR CODE PIX
 
     const resposta = await fetch(
       `${ASAAS_API}/pix/qrCodes/static`,
       {
         method: "POST",
-
         headers: {
           accept: "application/json",
           "content-type": "application/json",
           access_token: apiKey,
         },
-
         body: JSON.stringify({
           addressKey: pixKey,
-
-          description: `Seu Nutri - ${
-            plano || "Plano personalizado"
-          }`,
-
+          description: `Seu Nutri - ${plano}`,
           value: valor,
-
           format: "ALL",
-
           allowsMultiplePayments: false,
-
           externalReference: pedidoId,
         }),
       }
@@ -157,113 +170,67 @@ export async function POST(request: Request) {
 
     const texto = await resposta.text();
 
-    let dados;
+    let dados: any;
 
     try {
       dados = JSON.parse(texto);
     } catch {
-      dados = {
-        resposta: texto,
-      };
+      dados = {};
     }
 
-    // =========================
-    // ERRO ASAAS
-    // =========================
+    // 7. TRATAR ERRO ASAAS
 
     if (!resposta.ok) {
-      console.error("=================================");
-      console.error("ERRO ASAAS");
-      console.error("=================================");
-      console.error(dados);
+      const mensagem =
+        dados?.errors?.[0]?.description ||
+        dados?.mensagem ||
+        "Não foi possível criar o QR Code PIX.";
 
-      await adminDb
-        .collection("pedidos")
-        .doc(pedidoId)
-        .update({
-          status: "erro",
-          erroAsaas: dados,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-      return NextResponse.json(
-        {
-          erro: true,
-
-          mensagem:
-            dados?.errors?.[0]?.description ||
-            dados?.mensagem ||
-            "Não foi possível criar o QR Code PIX.",
-
-          detalhes: dados,
-        },
-        {
-          status: resposta.status,
-        }
-      );
-    }
-
-    // =========================
-    // QR CODE CRIADO
-    // =========================
-
-    console.log("=================================");
-    console.log("QR CODE PIX CRIADO");
-    console.log("=================================");
-    console.log(dados);
-
-    // =========================
-    // ATUALIZA PEDIDO
-    // =========================
-
-    await adminDb
-      .collection("pedidos")
-      .doc(pedidoId)
-      .update({
-        pixQrCodeId: dados.id || null,
-
-        pixPayload: dados.payload || null,
-
-        status: "pix_gerado",
-
+      await pedidoRef.update({
+        status: "erro",
+        erroAsaas: mensagem,
         updatedAt: FieldValue.serverTimestamp(),
       });
 
-    // =========================
-    // RESPOSTA PARA O CHECKOUT
-    // =========================
+      return NextResponse.json(
+        { erro: true, mensagem },
+        { status: resposta.status }
+      );
+    }
+
+    // 8. ATUALIZAR PEDIDO
+
+    await pedidoRef.update({
+      pixQrCodeId: dados.id || null,
+      pixPayload: dados.payload || null,
+      status: "pix_gerado",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // 9. RETORNAR PIX AO CHECKOUT
 
     return NextResponse.json({
       sucesso: true,
-
       pedidoId,
-
       uid,
-
       valor,
-
-      plano: plano || null,
-
+      plano,
       pix: {
         id: dados.id,
         payload: dados.payload,
         encodedImage: dados.encodedImage,
       },
     });
+
   } catch (error) {
-    console.error("=================================");
-    console.error("ERRO INTERNO");
-    console.error("=================================");
-    console.error(error);
+    console.error("Erro interno ao criar pagamento PIX.");
 
     return NextResponse.json(
       {
         erro: true,
         mensagem: "Erro interno ao criar o pagamento.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
