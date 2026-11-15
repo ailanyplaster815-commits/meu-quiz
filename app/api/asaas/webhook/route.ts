@@ -93,14 +93,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (
-      pagamento.status !== "CONFIRMED" &&
-      pagamento.status !== "RECEIVED"
-    ) {
-      return NextResponse.json(
-        { erro: "Pagamento ainda não confirmado." },
-        { status: 400 }
-      );
-    }
+  pagamento.status !== "CONFIRMED" &&
+  pagamento.status !== "RECEIVED"
+) {
+  return NextResponse.json(
+    { erro: "Pagamento ainda não confirmado." },
+    { status: 400 }
+  );
+}
+
+if (pagamento.billingType !== "PIX") {
+  return NextResponse.json(
+    { erro: "Forma de pagamento inválida." },
+    { status: 400 }
+  );
+}
 
     const valorPagamento = Number(pagamento.value);
 
@@ -161,6 +168,16 @@ export async function POST(req: NextRequest) {
 
     const resultado = await adminDb.runTransaction(async (tx) => {
       const eventoExistente = await tx.get(eventoRef);
+    
+      const pagamentoQuery = adminDb
+  .collection("webhook_pagamentos")
+  .doc(pagamento.id);
+
+const pagamentoExistente = await tx.get(pagamentoQuery);
+
+if (pagamentoExistente.exists) {
+  return "pagamento_ja_processado";
+}
 
       if (eventoExistente.exists) {
         return "duplicado";
@@ -287,6 +304,12 @@ export async function POST(req: NextRequest) {
       );
 
       // Registrar evento processado.
+      tx.set(pagamentoQuery, {
+  pagamentoId: pagamento.id,
+  pedidoId: pedidoSnap.id,
+  uid: pedido.uid,
+  processadoEm: FieldValue.serverTimestamp(),
+});
 
       tx.set(eventoRef, {
         evento,

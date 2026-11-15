@@ -7,6 +7,7 @@ import {
   loginComGoogle,
   loginComEmail,
   recuperarSenha,
+  loginAnonimo,
 } from "./lib/auth";
 
 import { salvarUsuario } from "./lib/storage";
@@ -22,46 +23,56 @@ export default function Home() {
   const [mensagem, setMensagem] = useState("");
 
   // NOVO USUÁRIO
-  async function continuar() {
-    const emailLimpo = email.trim().toLowerCase();
+  
+async function continuar() {
+  const emailLimpo = email.trim().toLowerCase();
 
-    if (!emailLimpo) {
-      setMensagem("Digite seu e-mail.");
-      return;
-    }
+  if (!emailLimpo) {
+    setMensagem("Digite seu e-mail.");
+    return;
+  }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) {
-      setMensagem("Digite um e-mail válido.");
-      return;
-    }
+  
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) {
+  setMensagem("Digite um e-mail válido.");
+  return;
+}
 
-    try {
-      setCarregando(true);
-      setMensagem("");
+  try {
+    setCarregando(true);
+    setMensagem("");
 
-      await salvarLead({
+    // Identifica o cliente no Firebase sem pedir senha.
+    const usuario = await loginAnonimo();
+
+    await salvarLead({
+      email: emailLimpo,
+      origem: "email",
+      uid: usuario.uid,
+    });
+
+    localStorage.setItem(
+      "usuario",
+      JSON.stringify({
+        uid: usuario.uid,
         email: emailLimpo,
         origem: "email",
-      });
+        anonimo: true,
+      })
+    );
 
-      localStorage.setItem(
-        "usuario",
-        JSON.stringify({
-          email: emailLimpo,
-          origem: "email",
-        })
-      );
+    localStorage.setItem("emailCliente", emailLimpo);
 
-      localStorage.setItem("emailCliente", emailLimpo);
-
-      router.push("/formulario");
-    } catch (error) {
-      console.error(error);
-      setMensagem("Não foi possível continuar. Tente novamente.");
-    } finally {
-      setCarregando(false);
-    }
+    router.push("/formulario");
+  } catch (error) {
+    console.error("Erro ao iniciar cadastro:", error);
+    setMensagem(
+      "Não foi possível continuar. Tente novamente."
+    );
+  } finally {
+    setCarregando(false);
   }
+}
 
   // LOGIN COM GOOGLE
   async function entrarGoogle() {
