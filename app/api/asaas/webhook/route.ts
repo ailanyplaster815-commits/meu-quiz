@@ -324,12 +324,17 @@ if (pagamentoExistente.exists) {
 
     // 7. RESPONDER AO ASAAS
 
-    if (resultado === "duplicado") {
-      return NextResponse.json({
-        recebido: true,
-        duplicado: true,
-      });
-    }
+    if (
+  resultado === "duplicado" ||
+  resultado === "pagamento_ja_processado" ||
+  resultado === "sandbox_ignorado"
+) {
+  return NextResponse.json({
+    recebido: true,
+    duplicado: resultado !== "sandbox_ignorado",
+    ignorado: resultado === "sandbox_ignorado",
+  });
+}
 
     if (resultado === "questionario_nao_encontrado") {
       return NextResponse.json(
